@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="fr">
+   
+<style>
+  a:link {
+    color: blue;
+    background-color: transparent;
+    text-decoration: underline;
+    }
+  a:hover {
+    color: black;
+    background-color: transparent;
+    text-decoration: underline;
+    }
+  #tabletype {
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+    width: 100%;
+  }
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+  }
+
+.switch input { 
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 26px;
+  width: 26px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+input:checked + .slider {
+  background-color: #2196F3;
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 1px #2196F3;
+}
+
+input:checked + .slider:before {
+  -webkit-transform: translateX(26px);
+  -ms-transform: translateX(26px);
+  transform: translateX(26px);
+}
+
+/* Rounded sliders */
+.slider.round {
+  border-radius: 34px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+</style> 
+
+<head>
+    <title>Configuration ESP32 CAM</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8" />
+    <link rel="stylesheet" type="text/css" href="w3.css">
+    <script type="text/javascript" src="jquery-3.6.1.min.js"></script>
+    <script type="text/javascript" src="script.js"></script>
+</head>
+
+<body onload="getData()" class="w3-animate-opacity">
+  <div class="vertical-center">
+    <div class="w3-card w3-blue w3-padding-small w3-center">
+      <h3><img src="Camera_img.png" alt="Lights" style="width: 80px" class="w3-image w3-left">CONFIGURATION ESP32CAM<img src="Camera_img.png" alt="Lights" style="width: 80px" class="w3-image w3-right"><br>
+      <span id="displayversion">?</span></h3>
+    </div>
+    <div class="w3-margin w3-center w3-card w3-padding-small">
+      <h4 class="w3-padding-small w3-center">Adresse IP: <span id="displayipadresse">?</span></h4>
+      <div class="w3-row-padding">
+      <h4>
+        <div class="w3-half">
+          <label class="w3-label w3-right" type="text" for="HostName">Host Name (<span id="displayhostname">?</span>): </label>
+        </div>
+        <div class="w3-half">
+          <input class="w3-input w3-left" name="inputhost" id="inputhostname" placeholder="New HostName" type="text" style="width: 250px;"></center>
+        </div>
+      </h4>
+    </div>
+        
+    <h4>
+      <input class="w3-radio" type="radio" name="networktype" id="AccessPointId" value="AccessPoint">
+      <label>Access Point</label>
+      <input class="w3-radio" type="radio" name="networktype" id="AccessWifiId" value="AccessWifi">
+      <label>WiFi Client</label>
+    </h4>
+
+    <div class="w3-row-padding"><h4>
+      <div class="w3-half">
+        <label class="w3-label w3-right" type="text" for="WiFiName">WiFi Network (<span id="displayssid">?</span>):</label>
+      </div>
+      <div class="w3-half">
+        <input class="w3-input w3-left" id="inputwifiname" placeholder="New WiFi Network" type="text" style="width: 250px;">
+      </div> 
+    </h4></div>
+
+    <div class="w3-row-padding"><h4>
+      <div class="w3-half">
+        <label class="w3-label w3-right" type="text" for="WiFiPassword">WiFi Password :</label>
+      </div>
+      <div class="w3-half">
+        <input class="w3-input w3-left" id="inputwifipassword" placeholder="Input Password" type="inputpassword" style="width: 250px;">
+      </div>
+    </h4></div>
+
+    <h4>
+      <label class="w3-label w3-center"><label for="FluxVideo">Flux Video :</label>
+      <input class="w3-check w3-padding" id="HTTPcheckboxId" type="checkbox">
+      <label>HTML</label>
+      <input class="w3-check w3-padding" id="RTSPcheckboxId" type="checkbox">
+      <label>RTSP</label>
+    </h4>    
+
+    <div class="w3-row-padding"><h4>
+      <div class="w3-half">
+        <label class="w3-label w3-right" type="text" for="RTSPPort">RTSP Port (<span id="displayportrtsp">?</span><span>):</span></label>
+      </div>     
+      <div class="w3-half">
+        <input class="w3-input w3-left" id="inputportrtsp" placeholder="New RTSP port" type="text" style="width: 250px;">
+      </div></h4>
+    </div>
+  </div>
+
+<!--
+<div class="w3-margin w3-center w3-card w3-padding-24">
+    <button id="boutonTest" class="w3-button w3-white w3-border w3-xlarge w3-ripple w3-wide">Test</button>
+</div>
+-->
+    <div class="w3-margin w3-center w3-padding-small">
+        <h4 class="w3-bar"></h4>
+        <button style="margin:5px;" onclick="restartButton()" class="w3-button w3-ripple w3-blue w3-large w3-wide w3-round-xlarge" style="width:25%;">RESTART</button>
+        <button style="margin:5px;" id="saveButton" class="w3-button w3-ripple w3-blue w3-large w3-wide w3-round-xlarge" style="width:25%;">SAVE & RESTART</button>
+        <button style="margin:5px;" onclick="reinitButton()" class="w3-button w3-ripple w3-blue w3-large w3-wide w3-round-xlarge" style="width:25%;">REINIT</button>
+        <br>
+        <p><table id="tabletype">
+            <th>
+            <a href="userguide.html" style="text-decoration: none;  text-decoration: underline; "><b>User Guide</b></a></th>
+            <th>
+            <a href="camera.html" style="text-decoration: none;  text-decoration: underline;"><b>Camera view</b></a></th>
+       </table></p>
+    </div>
+    <i><center><a href="http://davidray.fr" style="text-decoration: none;">David Ray 2022</a></i></center>
+   </div>
+  
+  </body>
+</html>

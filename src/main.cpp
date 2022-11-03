@@ -199,7 +199,10 @@ String XML_ConnectionData(void){
     String ch=String("<?xml version = \"1.0\" ?>")+String("<inputs>");
     ch=ch+String("<version>")+String(version)+String("</version>");
     ch=ch+String("<wifimode>")+String(memory.WiFiMode)+String("</wifimode>");
-    ch=ch+String("<ipadresse>")+WiFi.localIP().toString()+String("</ipadresse>");
+    if (String(memory.WiFiMode)=="WIFI_STA")
+      ch=ch+String("<ipadresse>")+WiFi.localIP().toString()+String("</ipadresse>");
+    if (String(memory.WiFiMode)=="WIFI_AP")
+      ch=ch+String("<ipadresse>")+WiFi.softAPIP().toString()+String("</ipadresse>");
     ch=ch+String("<namessid>")+String(memory.ssid)+String("</namessid>"); 
     ch=ch+String("<hostname>")+String(memory.hostname)+String("</hostname>");
     if (memory.http_enable) 

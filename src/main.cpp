@@ -287,7 +287,8 @@ void setup()
       }
     }
   Serial.print("mDNS responder started with ");
-  Serial.println(memory.hostname+".local");
+  Serial.print(memory.hostname);
+  Serial.println(".local");
 
    //----------------------------------------------------OTA
   confOTA(memory.hostname,memory.OTApassword);

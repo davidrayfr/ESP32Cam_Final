@@ -20,7 +20,7 @@ struct EEPROM_Data {
   char ssid[32];
   char WiFiPassword[32];
   char OTApassword[32];
-  char hostname[64];
+  char hostname[32];
   bool http_enable;
   bool rtsp_enable;
   unsigned short rtsp_port;

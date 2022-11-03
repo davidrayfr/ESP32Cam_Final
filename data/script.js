@@ -14,7 +14,7 @@ $(document).ready(function(){
             httpenable: document.getElementById("HTTPcheckboxId").checked,
             rtspenable : document.getElementById("RTSPcheckboxId").checked,
             portrtsp: $("#inputportrtsp").val()
-        });
+            });
         window.close();
         };
     });

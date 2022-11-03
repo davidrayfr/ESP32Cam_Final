@@ -45,12 +45,22 @@ int longClickId = false; // Detection Long Click
 // Data regarding WebPortal
 #define TIME_CONFIG_PORTAL 600000 // Time of Portal config open (in millisecond)
 bool http_Config_Portal_activ=false;
+// Date for Soft AP
+IPAddress apIP = IPAddress(192, 168, 1, 1);
 
 int64_t previousMillis=0;
 
 AsyncWebServer server(80);
 
 EEPROM_Data memory;
+
+// initialisation Camera
+OV2640 cam;
+
+WiFiServer rtspServer(554);
+CStreamer *streamer;
+CRtspSession *session;
+WiFiClient client; // FIXME, support multiple clients
 
 // declaration in advance
 void http_Config_Portal_Start();
@@ -254,27 +264,39 @@ void setup()
   //----------------------------------------------------WIFI
   if (String(memory.WiFiMode)=="WIFI_STA")
     {
+      // CONFIG CLIENT WIFI
     WiFi.mode(WIFI_STA);
     WiFi.begin(memory.ssid, memory.WiFiPassword);
 	  Serial.print("Tentative de connexion...");
-	    while(WiFi.status() != WL_CONNECTED)
+	  while(WiFi.status() != WL_CONNECTED)
 	    {
 		  Serial.print(".");
 		  delay(100);
 	    }
-	    Serial.println("\n");
-	    Serial.println("Connexion etablie!");
-      Serial.print("Adresse IP: ");
-	    Serial.println(WiFi.localIP());
+	  Serial.println("\n");
+	  Serial.println("Connexion etablie!");
+    Serial.print("Adresse IP: ");
+	  Serial.println(WiFi.localIP());
     }
     else
     {
-      if (String(memory.WiFiMode)=="WIFI_AP")
+      // CONFIG ACCESS POINT WIFI
+    if (String(memory.WiFiMode)=="WIFI_AP")
       {
       WiFi.mode(WIFI_AP);
-      WiFi.softAP(memory.hostname, NULL, 7, 0, 1);
-      Serial.print("AP Created with IP Gateway ");
-      Serial.println(WiFi.softAPIP());
+      WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+      bool result = WiFi.softAP(memory.hostname,NULL,1,0,1);
+      if (!result)
+        {
+        Serial.println("AP Config failed.");
+        return;
+        }
+    else
+        {
+        Serial.println("AP Config Success.");
+        Serial.print("AP MAC: ");
+        Serial.println(WiFi.softAPmacAddress());
+        }
       }
     else
       {
@@ -329,7 +351,6 @@ void setup()
   timerAlarmWrite(My_timer,TIME_BLINK*1000,true);
   Serial.println("fin configuration Timer");
   }
-
 
 void http_Config_Portal_Start()
 {
@@ -433,6 +454,18 @@ server.on("/receiveData", HTTP_POST, [](AsyncWebServerRequest *request){
     request->send(200);
     handleREINIT();
   });
+
+  server.on("/camera", HTTP_GET, [](AsyncWebServerRequest *request)
+  { 
+    String response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+    request->send(200,"text/html",response);
+    while (1)
+    {
+        cam.run();
+        request->send(200,"image/jpg", (char *)cam.getfb());
+    }});
+
 // Demarrage Serveur
   server.begin();
   Serial.println("Serveur actif!");
@@ -448,6 +481,86 @@ void http_Config_Portal_Closure()
   Serial.println("time ended / http Portal Closure");
   delay(2000);
   server.end();
+}
+/*
+void handle_jpg_stream(void)
+{
+    WiFiClient client = server.client();
+    String response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+    server.sendContent(response);
+
+    while (1)
+    {
+        cam.run();
+        if (!client.connected())
+            break;
+        response = "--frame\r\n";
+        response += "Content-Type: image/jpeg\r\n\r\n";
+        server.sendContent(response);
+
+        client.write((char *)cam.getfb(), cam.getSize());
+        server.sendContent("\r\n");
+        if (!client.connected())
+            break;
+    }
+}
+
+void handle_jpg(void)
+{
+    WiFiClient client = server.client();
+
+    cam.run();
+    if (!client.connected())
+    {
+        return;
+    }
+    String response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-disposition: inline; filename=capture.jpg\r\n";
+    response += "Content-type: image/jpeg\r\n\r\n";
+    server.sendContent(response);
+    client.write((char *)cam.getfb(), cam.getSize());
+}
+*/
+
+void rtsp_Stream_Server()
+{
+// Max Frame
+    uint32_t msecPerFrame = 100;
+    static uint32_t lastimage = millis();
+
+    // If we have an active client connection, just service that until gone
+    // (FIXME - support multiple simultaneous clients)
+    if(session) {
+        session->handleRequests(0); // we don't use a timeout here,
+        // instead we send only if we have new enough frames
+        uint32_t now = millis();
+        if(now > lastimage + msecPerFrame || now < lastimage) { // handle clock rollover
+            session->broadcastCurrentFrame(now);
+            lastimage = now;
+
+            // check if we are overrunning our max frame rate
+            now = millis();
+            if(now > lastimage + msecPerFrame)
+                printf("warning exceeding max frame rate of %d ms\n", now - lastimage);
+        }
+
+        if(session->m_stopped) {
+            delete session;
+            delete streamer;
+            session = NULL;
+            streamer = NULL;
+        }
+    }
+    else {
+        client = rtspServer.accept();
+
+        if(client) {
+            //streamer = new SimStreamer(&client, true);             // our streamer for UDP/TCP based RTP transport
+            streamer = new OV2640Streamer(&client, cam);             // our streamer for UDP/TCP based RTP transport
+            session = new CRtspSession(&client, streamer); // our threads RTSP session and state
+        }
+    }
 }
 
 void loop()

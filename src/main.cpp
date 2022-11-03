@@ -1,64 +1,200 @@
 // Web Server with SPIFFS
-#define STRUCT_MAGIC 12345678
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+#include <EEPROM.h>
+#include <WebServer.h>
+#include <WiFiClient.h>
+#include "OV2640.h"
+#include "SimStreamer.h"
+#include "OV2640Streamer.h"
+#include "CRtspSession.h"
+#include "OTA.h"
+#include "eeprom_Sauv.h"
+#include "datakeys.h"
+#include "OneButton.h"
 #include "SPIFFS.h"
 #include "ESPAsyncWebServer.h"
-
-const char *ssid = "MaisonRay300";
-const char *password = "CamilleEmilie";
-//const char *ssid = "Vatan2.4";
-//const char *password = "Vascjbb5";
+#include "OneButton.h"
 
 const int led = 2;
-const int capteurLuminosite = 34;
-const char *version= "Version 0.1";
 
-/*
-WIFI_OFF     WIFI_MODE_NULL
-WIFI_STA     WIFI_MODE_STA
-WIFI_AP      WIFI_MODE_AP
-WIFI_AP_STA  WIFI_MODE_APSTA */
+// Data regarding LED
+#define RED_LED_PIN 33 // LED rouge: GPIO 33
+#define WHITE_LED_PIN 4 // LED blanche: GPIO 4 - ESP32 CAM
+#define BUTTON_PIN 12 // Bouton Branché sur GPIO 12
+#define canalPWM 7 // un canal PWM disponible
+#define MAX_PWM 128 // Intensity Max Led
+int ledBright=0;
+const int AMPLITUDE_MAX_LED=200; // Amplitude Max LED 
+const int COEF=20; // COEF Evolution Pulse 1 Tres lent 20 Rapide
+int pulseFlag = false; // pulseFlag=flase -> Blink pulseFlag= True
+int whiteLedStatus = false;
 
-struct EEPROM_Data {
-  long unsigned int magic;
-  char WiFiMode[4];
-  char ssid[32];
-  char WiFiPassword[32];
-  char OTApassword[32];
-  char hostname[64];
-  bool http_enable;
-  bool rtsp_enable;
-  unsigned short rtsp_port;
-  };
+// Data Regarding Button Management
+#define TIME_LONG_CLICK_DETECTION 5000 // Detection Tps Mini long clic in Millisecondes
+#define TIME_LONG_CLICK_START 1000 // Detection start Long Click (milliseconds)
+#define TIME_AFTER_LONG_CLICK 5000 // Detection second click after long clic (milliseconds)
+#define TIME_BLINK 100 // Time - Frequency blink for Led in MilliSecond
+unsigned long pressStartTime;
+int longClickId = false; // Detection Long Click
 
-//Initial Valeur stored in EEPROM
-const struct EEPROM_Data INITIAL_VALUE={
-                    STRUCT_MAGIC,
-                    "AP",
-                    "MaisonRay300",
-                    "CamilleEmilie",
-                    "123456",
-                    "Esp32Cam",
-                    true,
-                   true,
-                    554
-                };
+// Data regarding WebPortal
+#define TIME_CONFIG_PORTAL 600000 // Time of Portal config open (in millisecond)
+bool http_Config_Portal_activ=false;
+
+int64_t previousMillis=0;
 
 AsyncWebServer server(80);
 
 EEPROM_Data memory;
 
-/*String processor(const String& var){
-  Serial.println(var);
-  if(var == "ADRESSEIP"){
-    String val=String(WiFi.localIP());
-    Serial.println(val);
-    return val;
-  }
-  return String();
-}*/
+// declaration in advance
+void http_Config_Portal_Start();
+void http_Config_Portal_Closure();
 
+// Setup a new OneButton on pin PIN_INPUT
+// The 2. parameter activeLOW is true, because external wiring sets the button to LOW when pressed.
+OneButton button(BUTTON_PIN, true,true);
+hw_timer_t *My_timer=NULL;
+
+void handleREINIT()
+{
+  saveEEPROM(INITIAL_VALUE);
+  Serial.println("Reset EEPROM / Restart ESP32");
+  delay(1000);
+  ESP.restart();
+}
+
+void handleRESTART()
+{
+  Serial.println("Restart ESP32");
+  delay(1000);
+  ESP.restart();
+}
+
+void whiteLedPulse()
+{
+    //digitalWrite(WHITE_LED_PIN, !digitalRead(WHITE_LED_PIN));
+  //ledcWrite(canalPWM, 5+((ledBright*10)%250));   //  LED blanche allumée (rapport cyclique 0,1%!)
+  int j=ledBright*COEF;
+  // Variation Led Blanche
+  ledcWrite(canalPWM,((j/AMPLITUDE_MAX_LED)%2)*(AMPLITUDE_MAX_LED-j%AMPLITUDE_MAX_LED)+(((AMPLITUDE_MAX_LED+j)/AMPLITUDE_MAX_LED)%2)*(j%AMPLITUDE_MAX_LED));
+  ledBright++;
+  }
+
+void whiteLedBlink()
+{
+    if (ledcRead(canalPWM)==0) {
+              ledcWrite(canalPWM, MAX_PWM);   //  LED blanche éteinte (rapport cyclique 0%)
+    }
+    else {
+    ledcWrite(canalPWM, 0);
+    }
+}
+
+void redLedBlink()
+{
+    digitalWrite(RED_LED_PIN, !digitalRead(RED_LED_PIN));
+}
+
+void IRAM_ATTR checkTicks() {
+  // include all buttons here to be checked
+  button.tick(); // just call tick() to check the state.
+}
+
+void IRAM_ATTR onTimer() {
+  // include all buttons here to be checked
+  if (pulseFlag)
+  {
+      whiteLedPulse();
+  }
+  else
+  {
+     whiteLedBlink();
+  }  
+}
+
+// DOuble clic detection
+void doubleClick()
+{
+Serial.println("Double Click detected > RESTART");
+// Blink launch
+handleRESTART();
+}
+
+void simpleClick()
+{
+Serial.println("Simple Click detected");
+// Verificaton si clic after long clic
+Serial.println(millis()-previousMillis);
+if (longClickId) {
+// Si Simple CLick après long click (> Reinitialisation)
+  if (millis()-previousMillis<TIME_AFTER_LONG_CLICK){
+    Serial.println("HANDLE REINIT");
+    handleREINIT();
+    }
+  else{
+    longClickId=false;
+    timerAlarmDisable(My_timer);
+    ledcWrite(canalPWM, 0);   //  LED blanche éteinte (rapport cyclique 0%)
+    }
+  }
+ else
+  {
+  if(http_Config_Portal_activ)    
+    http_Config_Portal_Closure();
+    else
+    http_Config_Portal_Start();
+  }
+}
+
+// Long press detected
+// Wait Second short clic to start in the TIME
+// LED Blink
+void longClick()
+{
+Serial.println("Long Click");
+longClickId=true;
+pulseFlag=false;
+timerAlarmEnable(My_timer);
+//Wait second clic during TIME_AFTER_LONG_CLICK
+previousMillis=millis();
+http_Config_Portal_activ=false;
+}
+
+// this function will be called when the button was held down for 1 second or more.
+void pressStart() {
+  Serial.println("pressStart()");
+  if (timerAlarmEnabled(My_timer)) {
+    timerAlarmDisable(My_timer);
+    longClickId=false;
+    digitalWrite(RED_LED_PIN, HIGH);
+    ledcWrite(canalPWM, 0);   //  LED blanche éteinte (rapport cyclique 0%)
+  }
+  pressStartTime = millis() - TIME_LONG_CLICK_START; // as set in setPressTicks()
+} // pressStart()
+
+// this function will be called when the button was released after a long hold.
+void pressStop() {
+  Serial.print("pressStop(");
+  Serial.print(millis() - pressStartTime);
+  Serial.println(") detected.");
+  if ((millis() - pressStartTime)>TIME_LONG_CLICK_DETECTION)
+    {
+      Serial.println("long hold detected / More than TIME_LONG_CLICK_START");
+    }
+    else {
+      longClick();
+    }
+  } // pressStop()
+
+// This function start after long press following by short clic
+
+//Construction chaine XML pour envoi page WEB
 String XML_ConnectionData(void){
     String ch=String("<?xml version = \"1.0\" ?>")+String("<inputs>");
     ch=ch+String("<version>")+String(version)+String("</version>");
@@ -78,16 +214,16 @@ String XML_ConnectionData(void){
     ch=ch+String("</inputs>");
   return ch; 
 };
+
 void setup()
 {
   //----------------------------------------------------Serial
   Serial.begin(115200);
   Serial.println("\n");
-  memory=INITIAL_VALUE;
+
   //----------------------------------------------------GPIO
   pinMode(led, OUTPUT);
   digitalWrite(led, LOW);
-  pinMode(capteurLuminosite, INPUT);
 
   //----------------------------------------------------SPIFFS
   if(!SPIFFS.begin())
@@ -107,21 +243,95 @@ void setup()
     file = root.openNextFile();
   }
 
+//----------------------------EEPROM INITIALISATION & LOADING
+// Si mémoire vide -> Enregistrement de la valeur initiale
+  memory=loadEEPROM(INITIAL_VALUE);
+  showEEPROM();
+  Serial.println(memory.WiFiMode);
   //----------------------------------------------------WIFI
-  WiFi.begin(ssid, password);
-	Serial.print("Tentative de connexion...");
-	
-	while(WiFi.status() != WL_CONNECTED)
-	{
-		Serial.print(".");
-		delay(100);
-	}
-	
-	Serial.println("\n");
-	Serial.println("Connexion etablie!");
-	Serial.print("Adresse IP: ");
-	Serial.println(WiFi.localIP());
+  if (String(memory.WiFiMode)=="WIFI_STA")
+    {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(memory.ssid, memory.WiFiPassword);
+	  Serial.print("Tentative de connexion...");
+	    while(WiFi.status() != WL_CONNECTED)
+	    {
+		  Serial.print(".");
+		  delay(100);
+	    }
+	    Serial.println("\n");
+	    Serial.println("Connexion etablie!");
+      Serial.print("Adresse IP: ");
+	    Serial.println(WiFi.localIP());
+    }
+    else
+    {
+      if (String(memory.WiFiMode)=="WIFI_AP")
+      {
+      WiFi.mode(WIFI_AP);
+      WiFi.softAP(memory.hostname, NULL, 7, 0, 1);
+      Serial.print("AP Created with IP Gateway ");
+      Serial.println(WiFi.softAPIP());
+      }
+    else
+      {
+      Serial.println("ERROR - no WiFi Mode");
+      //handleREINIT();
+      }
+    }
+ /*use mdns for host name resolution*/
+  if (!MDNS.begin(memory.hostname)) { //http://esp32.local
+    Serial.println("Error setting up MDNS responder!");
+    while (1) {
+      delay(1000);
+      }
+    }
+  Serial.print("mDNS responder started with ");
+  Serial.println(memory.hostname+".local");
 
+   //----------------------------------------------------OTA
+  confOTA(memory.hostname,memory.OTApassword);
+
+// Configuration LED
+  Serial.println("ledcSetup(canalPWM, 5000, 12)");
+  ledcSetup(canalPWM, 5000, 12); // canal = 7, frequence = 5000 Hz, resolution = 12 bit
+
+// enable the standard led on pin 13.
+  Serial.println("ledcAttachPin(WHITE_LED_PIN, 7)");
+  ledcAttachPin(WHITE_LED_PIN, 7); // Signal PWM broche 4, canal 7.
+  ledcWrite(canalPWM, 0);   //  LED blanche éteinte (rapport cyclique 0%) 
+  
+  //pinMode(WHITE_LED_PIN, OUTPUT); // sets the digital pin as output
+  Serial.println("pinMode(RED_LED_PIN, OUTPUT)");
+  pinMode(RED_LED_PIN, OUTPUT); // sets the digital pin as output
+     
+  // Initiate Led
+  //digitalWrite(WHITE_LED_PIN, HIGH);
+  Serial.println("Allumage LED RED");
+  digitalWrite(RED_LED_PIN, HIGH); // LED Rouge Etainte
+
+// Configuration Bouton
+// link the doubleclick function to be called on a doubleclick event.
+  button.attachDoubleClick(doubleClick);
+  button.attachClick(simpleClick);
+  button.setPressTicks(TIME_LONG_CLICK_START); // that is the time when LongPressStart is called
+  button.attachLongPressStart(pressStart);
+  button.attachLongPressStop(pressStop);
+  Serial.println("fin configuration Bouton");
+
+// initialisation Od timer interrupt
+  My_timer=timerBegin(0,80,true);
+  timerAttachInterrupt(My_timer,&onTimer,true);
+  timerAlarmWrite(My_timer,TIME_BLINK*1000,true);
+  Serial.println("fin configuration Timer");
+  }
+
+
+void http_Config_Portal_Start()
+{
+  previousMillis=millis();
+  timerAlarmEnable(My_timer);
+  pulseFlag=true;
   //----------------------------------------------------SERVER
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
   {
@@ -148,73 +358,59 @@ server.on("/Camera_img.png", HTTP_GET, [](AsyncWebServerRequest *request)
   request->send(SPIFFS,"/Camera_img.png","image/png");
   });
 
-  /*server.on("/receiveData", HTTP_POST, [](AsyncWebServerRequest *request) {
-    if(request->hasParam("nomssid", true))
-    {
-      String message;
-      message = request->getParam("nomssid", true)->value();
-      Serial.print("Wifi Nom reçu :");
-      Serial.println(message);
-    }
-    request->send(204);
-  });
-*/
 server.on("/receiveData", HTTP_POST, [](AsyncWebServerRequest *request){
-    Serial.println("receiveData");
+    Serial.println("received Data from Web Client");
     if(request->hasParam("hostname", true)){
       String hostname = request->getParam("hostname", true)->value();
       Serial.println(hostname);
+      if (hostname!="") strcpy(memory.hostname,hostname.c_str());
     };
      if(request->hasParam("wifiname", true)){
       String wifiname = request->getParam("wifiname", true)->value();
       Serial.println(wifiname);
+      if (wifiname!="") strcpy(memory.ssid,wifiname.c_str());
      };
       if(request->hasParam("wifipassword", true)){
       String wifipassword = request->getParam("wifipassword", true)->value();
       Serial.println(wifipassword);
+      if (wifipassword!="") strcpy(memory.WiFiPassword,wifipassword.c_str());
       };
       if(request->hasParam("networktype", true)){
       String networktype = request->getParam("networktype", true)->value();
       Serial.println(networktype);
-     };
+      if (networktype!="") strcpy(memory.WiFiMode,networktype.c_str());
+      };
       if(request->hasParam("rtspenable", true)){
       String rtspenable = request->getParam("rtspenable", true)->value();
       Serial.println(rtspenable);
+      if (rtspenable="true") memory.rtsp_enable=true;
+      else memory.rtsp_enable=false;
       };
       if(request->hasParam("httpenable", true)){
       String httpenable = request->getParam("httpenable", true)->value();
       Serial.println(httpenable);
+       if (httpenable="true") memory.http_enable=true;
+      else memory.http_enable=false;
       };
       if(request->hasParam("portrtsp", true)){
       String portrtsp = request->getParam("portrtsp", true)->value();
       Serial.println(portrtsp);
+      if (portrtsp!="") memory.rtsp_port = atoi(portrtsp.c_str());
       };
+    // Enregistrement dans EEPROM
     request->send(204);
+    saveEEPROM(memory);
+    showEEPROM();
 });
 
-  /*server.on("/envoid1", HTTP_GET, [](AsyncWebServerRequest *request)
-  {
-    String val = String(WiFi.localIP());
-    request->send(200, "text/plain", WiFi.localIP().toString());
-    Serial.println("envoid1");
-    });
-*/
 //Envoie les data de la connection en XML
 //via la fonction chaine
   server.on("/getData", HTTP_GET, [](AsyncWebServerRequest *request)
   {
-  Serial.println("envoiData");
-  Serial.println(XML_ConnectionData());
+  Serial.println("envoi Data XML vers client");
   request->send(200,"text/xml",XML_ConnectionData());
   });
 
-  /*server.on("/getInputTest", HTTP_GET, [](AsyncWebServerRequest *request)
-  {
-  Serial.println("getInputTest");
-  Serial.println("<?xml version = \"1.0\" ?><inputs><button1>ON</button1></inputs>");
-  request->send(200,"text/xml","<?xml version = \"1.0\" ?><inputs><button1>ON</button1></inputs>");
-  });
-*/
   server.on("/restart", HTTP_GET, [](AsyncWebServerRequest *request)
   {
     Serial.println("RESTART BUTTON");
@@ -231,13 +427,39 @@ server.on("/receiveData", HTTP_POST, [](AsyncWebServerRequest *request){
   {
     Serial.println("REINIT BUTTON");
     request->send(200);
+    handleREINIT();
   });
-
+// Demarrage Serveur
   server.begin();
   Serial.println("Serveur actif!");
+  previousMillis=millis();
+  http_Config_Portal_activ=true;
+}
+
+void http_Config_Portal_Closure()
+{
+  http_Config_Portal_activ=false;
+  timerAlarmDisable(My_timer);
+  ledcWrite(canalPWM, 0);   //  LED blanche éteinte (rapport cyclique 0%) 
+  Serial.println("time ended / http Portal Closure");
+  delay(2000);
+  server.end();
 }
 
 void loop()
 {
+//ArduinoOTA.handle();
+button.tick();
 
+// Check if Config Portal open
+if (((previousMillis+TIME_CONFIG_PORTAL)<millis()) and (http_Config_Portal_activ))
+  http_Config_Portal_Closure();
+  if (((previousMillis+TIME_AFTER_LONG_CLICK)<millis())and (longClickId))
+  {
+  longClickId=false;
+  timerAlarmDisable(My_timer);
+  ledcWrite(canalPWM, 0);   //  LED blanche éteinte (rapport cyclique 0%) 
+  Serial.println("time ended / long clic not anymore valid");
+  delay(1000);
+  }
 }

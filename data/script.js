@@ -2,9 +2,9 @@
 
 $(document).ready(function(){
     $("#saveButton").click(function(){
-        var valeur = document.querySelector('input[name="networktype"]:checked').value;
         if (confirm("Vous confirmer la sauvegarde et le redémarrage ?"))
         {
+            var valeur = document.querySelector('input[name="networktype"]:checked').value;
             $.post("receiveData",{
             hostname: $("#inputhostname").val(),
             wifiname: $("#inputwifiname").val(),
@@ -14,7 +14,8 @@ $(document).ready(function(){
             httpenable: document.getElementById("HTTPcheckboxId").checked,
             rtspenable : document.getElementById("RTSPcheckboxId").checked,
             portrtsp: $("#inputportrtsp").val()
-            });
+        });
+        window.close();
         };
     });
 });
@@ -25,6 +26,7 @@ function reinitButton() {
     if (confirm("Confirmer la reinitialisation ?\n (Attention les données de connection seront perdues)")) {
         xhttp.open("GET", "reinit", true);
         xhttp.send();
+        window.close();
         };
 };
 
@@ -32,6 +34,7 @@ function restartButton() {
     var xhttp = new XMLHttpRequest();
         xhttp.open("GET", "restart", true);
         xhttp.send();
+        window.close();
 };
 
 function getData()
@@ -46,13 +49,13 @@ function getData()
         document.getElementById("displayssid").innerHTML = this.responseXML.getElementsByTagName('namessid')[0].childNodes[0].nodeValue; 
         document.getElementById("displayhostname").innerHTML = this.responseXML.getElementsByTagName('hostname')[0].childNodes[0].nodeValue;     
         document.getElementById("displayportrtsp").innerHTML = this.responseXML.getElementsByTagName('portrtsp')[0].childNodes[0].nodeValue;     
-        if(this.responseXML.getElementsByTagName('wifimode')[0].childNodes[0].nodeValue == "STA")
-        {
-            AccessPointId.checked=true;
-        };
-        if(this.responseXML.getElementsByTagName('wifimode')[0].childNodes[0].nodeValue == "AP")
+        if(this.responseXML.getElementsByTagName('wifimode')[0].childNodes[0].nodeValue == "WIFI_STA")
         {
             AccessWifiId.checked=true;
+        };
+        if(this.responseXML.getElementsByTagName('wifimode')[0].childNodes[0].nodeValue == "WIFI_AP")
+        {
+            AccessPointId.checked=true;
         };
         if(this.responseXML.getElementsByTagName('http_enable')[0].childNodes[0].nodeValue == "1")
         {

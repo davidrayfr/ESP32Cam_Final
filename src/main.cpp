@@ -464,7 +464,8 @@ server.on("/receiveData", HTTP_POST, [](AsyncWebServerRequest *request){
     {
         cam.run();
         request->send(200,"image/jpg", (char *)cam.getfb());
-    }});
+    }
+  });
 
 // Demarrage Serveur
   server.begin();
